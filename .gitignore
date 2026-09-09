@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Envs
+.venv/
+venv/
+
+# Upstream reference clones (pinned locally, not part of our repo)
+Learn2Design-2026/
+Differometor/
+Differometor-Benchmark/
+
+# Experiment outputs
+results/
+!results/.gitkeep
+data/
+*.h5
+*.npz
+!results/**/*.json
+
+# JAX / dfbench defaults
+dfbench_output/
+objective_run_data/
+mlruns/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 HERE = os.path.dirname(__file__)
-s = json.load(open(os.path.join(HERE, "..", "results", "04_1d_probes", "summary.json")))
+s = json.load(open(os.path.join(HERE, "..", "..", "results", "04_1d_probes", "summary.json")))
 
 families = ["reflectivity", "tuning", "power", "length", "mass", "db", "angle"]
 fig, axes = plt.subplots(2, 4, figsize=(16, 7))

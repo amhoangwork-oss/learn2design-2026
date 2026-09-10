@@ -45,6 +45,6 @@ axes[7].text(0.02, 0.72, txt, fontsize=11, va="top")
 
 fig.suptitle("Learn2Design 1-D loss probes per property family (UIFO seed 42, CPU)", fontsize=13)
 fig.tight_layout()
-out = os.path.join(HERE, "..", "results", "04_1d_probes", "probe_curves.png")
+out = os.path.join(HERE, "..", "..", "results", "04_1d_probes", "probe_curves.png")
 fig.savefig(out, dpi=110)
 print("saved", out)

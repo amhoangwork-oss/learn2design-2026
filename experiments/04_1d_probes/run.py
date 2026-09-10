@@ -24,7 +24,12 @@ import jax.numpy as jnp
 
 from dfbench import Objective
 from dfbench.problems import UIFOProblem
-from dfbench import inverse_sigmoid_bounding
+
+
+def _inverse_sigmoid_bounding(params, bounds):
+    u = (params - bounds[0]) / (bounds[1] - bounds[0])
+    u = jnp.clip(u, 1e-7, 1 - 1e-7)
+    return jnp.log(u / (1 - u))
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "..", "results", "04_1d_probes")
 os.makedirs(OUT, exist_ok=True)
@@ -47,7 +52,7 @@ obj.start_logging()
 
 # unbounded (logit) space helpers
 def to_unbounded(p_b):
-    return inverse_sigmoid_bounding(p_b, problem.bounds)
+    return _inverse_sigmoid_bounding(p_b, problem.bounds)
 
 # base point: midpoint
 p_base = jnp.array((lower + upper) / 2.0)

@@ -1,5 +1,5 @@
 {
-  "note": "Uniform optimizer config for Exp 10 — set from the Exp 05/06 winner before submitting. Arms differ ONLY in the feasibility layer.",
+  "note": "Uniform optimizer config for Exp 10. Submitted with these a-priori defaults (job 1201) rather than waiting for the 05/06 winner: the projection methods change the loss landscape, so the penalty-era winner may not transfer. 05/06 arms remain the penalty-layer comparison; analysis compares all three experiments when they land." ,
   "K": 128,
   "seed": 42,
   "lr": 0.05,

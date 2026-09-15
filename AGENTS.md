@@ -1,19 +1,25 @@
 # Learn2Design-2026 — UIFO detector design optimization
 
 **Repo:** https://github.com/amhoangwork-oss/learn2design-2026
-**Status:** Phase 1 complete (loss-structure analysis). Phase 2: optimizer horse-race.
+**Status:** Phase 1 complete (loss-structure analysis). Phase 2 scaffolds (Exp 05–07)
+written, not yet run. Compute moved to the **hpc-cei HPC cluster**; workflow:
+code here → push GitHub → `git pull` on cluster → sbatch.
 
 ## Current state (update whenever strategy changes)
 
 - Competition: optimize ~200 continuous params of a hidden UIFO topology, 4 h
   wall-clock, score = mean over 10 topologies of best **feasible** loss. Round-1
   winner: 0.020; organizer best baseline NAAdamGD: 0.504.
+- Deadline: final submission **15 Oct 2026 AoE** (public leaderboard rounds 26 Aug /
+  12 Sep / 29 Sep 2026). Upstream/starter kit: `artificial-scientist-lab/Learn2Design-2026`.
 - Loss (source-verified):
   `L = mean_f log10(S/S_voy) + Σ_j p(P_j/T_j)`, `p = squash-relu`, thresholds
   hard 3.5e6 / soft 2e3 / detector 1e−2; feasibility is a separate hard max-check;
   score = min loss over feasible logged evals (random-search fallback if none).
 - Parameter families per size-3 topology (n≈187): reflectivity 52, tuning 52,
   mass 51, length 16, power 6, db 5, angle 5; 4 coupled pairs.
+- Execution: this Windows checkout is **code + docs only** (no dataset, no env).
+  All runs happen on the hpc-cei cluster (see Environment).
 
 ## Verified findings (see RESEARCH_LOG.md for details)
 
@@ -40,13 +46,40 @@
 4. Submit as single `OptimizationAlgorithm` subclass + requirements.txt (evaluator
    has no network; bundle everything).
 
+## Phase 2 experiment plan (on the cluster)
+
+Order: **07 → (05 ∥ 06) → 08 → 09**. One sbatch per arm — arms run
+wall-clock-parallel instead of Phase 1's 6.5 h sequential CPU runs. Each experiment
+writes `results/NN_name/`; commit the JSON summaries back to this repo and log the
+numbers in RESEARCH_LOG.md.
+
+| Exp | Question | Cluster shape |
+|---|---|---|
+| 07_k_scaling | vmap batch ceiling K = 32–2048; CPU vs A5000; fp32 vs fp64 cost | short jobs (one per K/device) — run first, sets K for everything |
+| 05_optimizer_race | raw vs preconditioned Adam × noise on/off, K=64/256 (seed 42) | 5 parallel sbatch jobs on 48-core CPU nodes |
+| 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | 3 parallel sbatch jobs |
+| 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | job array over topologies |
+| 09_end2end_4h | full pipeline (basins → Adam → L-BFGS → best-feasible) under competition-like 4 h budget, logged | single job on A5000 + CPU comparison; submission dry-run |
+
 ## Environment
 
-- conda env: `~/miniconda3/envs/learn2design` (Python 3.12, jax 0.9.0.1, dfbench 0.3.3,
-  differometor 0.0.5). CPU-only runs: `CUDA_VISIBLE_DEVICES="" JAX_PLATFORMS=cpu`.
-- Upstream clones (read-only, gitignored): `Learn2Design-2026/` (dfbench source +
-  competition_data/round1 + dataset.h5), `Learn2Design-2026/differometor_src/`.
-- CPU timing: new-trace JIT ≈ 5–15 min; compiled eval ≈ 0.15 ms; vmap traces compile
+**Local (Windows checkout)** — code + docs only; no dataset, no Python env, no
+local execution. Edit here → push GitHub → pull on cluster.
+
+**hpc-cei cluster** (ssh alias `hpc-cei`, user 23minhha; details in the
+hpc-cei-cluster skill):
+- Login `hpc-gw.local`; Slurm; partitions `compute` (48-core CPU nodes) + `gpu`
+  (4× RTX A5000 24 GB each, cc 8.6). Compute nodes have no internet — pip/staging
+  on the login node only.
+- Code: `~/learn2design-2026` (git pull to update). Upstream reference clone +
+  dataset.h5: `~/upstream/Learn2Design-2026` (gitignored in our repo; dataset
+  symlinked where run.py expects it).
+- Env: conda `l2d` (`module load python/miniforge3; conda activate l2d`) —
+  jax[cuda12], optax, dfbench 0.3.3, differometor 0.0.5, h5py.
+- Job data + Slurm logs: `/work/23minhha/learn2design/` (60-day idle purge — copy
+  result JSONs into the repo promptly).
+- Phase-1 reference (previous machine): conda env `~/miniconda3/envs/learn2design`;
+  CPU timing: new-trace JIT ≈ 5–15 min; compiled eval ≈ 0.15 ms; vmap traces compile
   separately (fix batch size per run).
 
 ## Key files
@@ -62,5 +95,7 @@
 - Feasibility is independent of the penalty function — penalty tricks only shape
   the search.
 - `best_loss` may be infeasible; track best-feasible separately.
-- GPU reserved for ML training — experiments CPU-only for now; final timing tests
-  on GPU later (H100 eval env).
+- All compute on hpc-cei **via Slurm only** (never the login node). A5000s are fair
+  game for batched optimization now; the H100 eval env remains the timing referee
+  (A5000 numbers are a proxy).
+- GPU reserved for ML training locally — local machine runs no experiments.

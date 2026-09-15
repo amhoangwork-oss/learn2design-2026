@@ -6,8 +6,11 @@
 | 02 | Gradient conditioning per property family | ✅ |
 | 03 | Dataset reproducibility (dataset → problem → params) | ✅ |
 | 04 | 1-D response probes (log-power, log(1−R), periodicity) | ✅ |
-| 05 | Optimizer horse-race on seed 42 (Adam variants, preconditioning) | next |
-| 06 | Feasibility repair: penalty schedule + best-feasible tracking | next |
+| 05 | Optimizer horse-race on seed 42 (Adam variants, preconditioning) | scaffolded — run on hpc-cei, one sbatch per arm |
+| 06 | Feasibility repair: penalty schedule + best-feasible tracking | scaffolded — run on hpc-cei, one sbatch per arm |
+| 07 | K-scaling microbenchmark (CPU vs A5000, fp32/fp64) | scaffolded — run first, sets K |
+| 08 | Multi-topology transfer: best config on ~10 held-out dataset topologies | planned |
+| 09 | End-to-end 4 h-budget dry run (submission scaffold validation) | planned |
 
 ---
 

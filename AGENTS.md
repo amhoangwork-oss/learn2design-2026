@@ -65,13 +65,16 @@ numbers in RESEARCH_LOG.md.
 one-GPU-per-job (`sbatch -p gpu --gres=gpu:1`) instead of CPU nodes, so the whole
 arm matrix iterates in wall-clock parallel. CPU nodes are the fallback only.
 
-**H100 transfer rule (K-scaling without CPU runs).** A5000: FP32 27.8 TFLOPS,
-FP64 0.43 TFLOPS (1:64), 768 GB/s, 24 GB. H100 PCIe: 51.2 / 26, 2039 GB/s, 80 GB;
-H100 SXM: 66.9 / 33.5, 3352 GB/s. Nominal fp32 throughput ratio 1.85× (PCIe) –
-2.4× (SXM); with a 0.5× safety factor the **K ceiling measured on A5000 is the
-guaranteed-safe H100 floor** (≈0.9–1.2×), and 2–3× is likely (bandwidth 2.65×,
-memory 3.3×). Confirm at first H100 eval-env access; don't burn CPU-hours
-re-measuring K on CPU nodes.
+**H100 transfer rule (K-scaling without CPU runs).** Measured on the first GPU
+attempt: the UIFO sim is **float64 natively** (f64[.,50,~700,~700] propagation
+tensors, ~200 MB/sample forward) regardless of `jax_enable_x64`, and unchunked
+vmap OOMs on a 24 GB A5000 at K=32. So Exp 07 sweeps **chunk sizes** (Exp 05/06
+loop chunks to reach total K), not K. Transfer is bandwidth-bound: A5000
+768 GB/s → H100 PCIe 2039 / SXM 3352 GB/s = **2.65× / 4.36× nominal**; with a
+0.5× safety margin the A5000-optimal chunk is the guaranteed-safe floor and
+~1.3–2.2× larger is likely. (FP64 compute ratio 60–78× bounds the
+compute-bound case from above.) Confirm at first H100 access; don't burn
+CPU-hours re-measuring on CPU nodes.
 
 ## Environment
 

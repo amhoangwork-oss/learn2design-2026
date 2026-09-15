@@ -5,7 +5,6 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=08:00:00
 #SBATCH --output=/work/23minhha/learn2design/logs/%x-%j.out
 #SBATCH --error=/work/23minhha/learn2design/logs/%x-%j.err
 

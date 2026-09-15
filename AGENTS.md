@@ -116,4 +116,9 @@ hpc-cei-cluster skill):
 - All compute on hpc-cei **via Slurm only** (never the login node). A5000s are fair
   game for batched optimization now; the H100 eval env remains the timing referee
   (A5000 numbers are a proxy).
+- **No `--time` on Slurm jobs** — let them run to completion (user instruction);
+  run.py scripts checkpoint per-arm summaries every 25 steps so partial work
+  survives any interruption.
+- Per-user job cap = 6 → multi-arm/multi-topology runs go out as ONE matrix job
+  (`experiments/cluster/run_matrix.sbatch`), never one job per arm, never arrays.
 - GPU reserved for ML training locally — local machine runs no experiments.

@@ -107,6 +107,11 @@ def run_chunks(fn, Xb):
 # baked into the trace at trace time, so switching set_penalty_fn requires a
 # fresh trace (a stale trace would keep optimizing the previous phase's loss).
 
+def _ckpt(name, payload):
+    # incremental checkpoint: survive any interruption
+    with open(os.path.join(OUT, f"summary_{name}.json"), "w") as f:
+        json.dump(payload, f, indent=2)
+
 def run_arm(name, zero_frac=0.0, aggressive=1.0, tail_frac=0.0, K=128, seed=7,
             lr=0.05, noise0=0.3, max_evals=25600):
     # Penalty schedule as phases (fraction of total evals each):
@@ -144,6 +149,7 @@ def run_arm(name, zero_frac=0.0, aggressive=1.0, tail_frac=0.0, K=128, seed=7,
     best = jnp.inf
     hist = []
     t0 = time.time()
+    gstep = 0
 
     for pen_fn, frac, label in phases:
         problem.set_penalty_fn(pen_fn)
@@ -170,7 +176,17 @@ def run_arm(name, zero_frac=0.0, aggressive=1.0, tail_frac=0.0, K=128, seed=7,
             key, nk = jax.random.split(key)
             updates = updates + jax.random.normal(nk, Z.shape) * (noise0 * nfrac) * 0.01
             Z = optax.apply_updates(Z, updates)
+            gstep += 1
             hist.append((time.time() - t0, float(bf)))
+            if gstep % 25 == 0:
+                _ckpt(name, dict(name=name, zero_frac=zero_frac, aggressive=aggressive,
+                                 tail_frac=tail_frac, K=K,
+                                 schedule=[lab for _, _, lab in phases],
+                                 iters=n_steps, evals=max_evals,
+                                 wall_s=time.time() - t0, best=float(best),
+                                 best_feasible=float(best_feas), n_feasible=n_feas,
+                                 feas_frac=n_feas / max_evals, phase=label,
+                                 step=gstep, hist=hist))
         print(f"  [{name}] phase {label} done: best={float(best):.4f} "
               f"best_feas={float(best_feas):.4f} n_feas={n_feas}", flush=True)
 

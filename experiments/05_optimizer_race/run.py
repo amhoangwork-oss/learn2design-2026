@@ -122,6 +122,11 @@ def vg_batch(Xb):
 def aux_batch(Xb):
     return run_chunks(_vaux, Xb)
 
+def _ckpt(name, payload):
+    # incremental checkpoint: survive walltime timeouts
+    with open(os.path.join(OUT, f"summary_{name}.json"), "w") as f:
+        json.dump(payload, f, indent=2)
+
 def run_arm(name, mode, K, seed, lr, noise0, max_evals, warm_restart_every=None):
     obj = Objective(problem, max_time=3600.0, max_evals=max_evals,
                     save=["batched_loss", "batched_is_feasible"])
@@ -196,6 +201,12 @@ def run_arm(name, mode, K, seed, lr, noise0, max_evals, warm_restart_every=None)
         if not first_feas_seen and jnp.isfinite(bf):
             first_feas_seen = True
             t_first_feas = time.time() - t0
+        if (it + 1) % 25 == 0:
+            _ckpt(name, dict(name=name, mode=mode, K=K, iters=n_steps, evals=max_evals,
+                             wall_s=time.time() - t0, best=float(best),
+                             best_feasible=float(best_feas), n_feasible=n_feas,
+                             feas_frac=n_feas / max_evals, t_first_feas_s=t_first_feas,
+                             step=it + 1, hist=hist))
 
     wall = time.time() - t0
     obj.finalize_display()

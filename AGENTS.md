@@ -55,11 +55,23 @@ numbers in RESEARCH_LOG.md.
 
 | Exp | Question | Cluster shape |
 |---|---|---|
-| 07_k_scaling | vmap batch ceiling K = 32–2048; CPU vs A5000; fp32 vs fp64 cost | short jobs (one per K/device) — run first, sets K for everything |
-| 05_optimizer_race | raw vs preconditioned Adam × noise on/off, K=64/256 (seed 42) | 5 parallel sbatch jobs on 48-core CPU nodes |
-| 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | 3 parallel sbatch jobs |
+| 07_k_scaling | vmap batch ceiling K on A5000 (fp32 vs fp64 cost); H100 transfer via TFLOP/bw ratios + safety margin (CPU K-scaling dropped) | 1–2 GPU sbatch jobs — run first, sets K for 09 |
+| 05_optimizer_race | raw vs preconditioned Adam × noise on/off, K=64/256 (seed 42) | one GPU sbatch per arm (idle A5000s, wall-clock-parallel) |
+| 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | one GPU sbatch per arm (A/B/C) |
 | 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | job array over topologies |
 | 09_end2end_4h | full pipeline (basins → Adam → L-BFGS → best-feasible) under competition-like 4 h budget, logged | single job on A5000 + CPU comparison; submission dry-run |
+
+**GPU-first rule.** Check `sinfo -p gpu` for idle A5000s before submitting; run arms
+one-GPU-per-job (`sbatch -p gpu --gres=gpu:1`) instead of CPU nodes, so the whole
+arm matrix iterates in wall-clock parallel. CPU nodes are the fallback only.
+
+**H100 transfer rule (K-scaling without CPU runs).** A5000: FP32 27.8 TFLOPS,
+FP64 0.43 TFLOPS (1:64), 768 GB/s, 24 GB. H100 PCIe: 51.2 / 26, 2039 GB/s, 80 GB;
+H100 SXM: 66.9 / 33.5, 3352 GB/s. Nominal fp32 throughput ratio 1.85× (PCIe) –
+2.4× (SXM); with a 0.5× safety factor the **K ceiling measured on A5000 is the
+guaranteed-safe H100 floor** (≈0.9–1.2×), and 2–3× is likely (bandwidth 2.65×,
+memory 3.3×). Confirm at first H100 eval-env access; don't burn CPU-hours
+re-measuring K on CPU nodes.
 
 ## Environment
 

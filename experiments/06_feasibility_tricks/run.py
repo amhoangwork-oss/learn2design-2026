@@ -19,7 +19,10 @@ import time
 import h5py
 import numpy as np
 
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+if os.environ.get("L2D_DEVICE") == "gpu":
+    os.environ.pop("JAX_PLATFORMS", None)  # use the sbatch-allocated GPU
+else:
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import jax
 import jax.numpy as jnp
@@ -94,7 +97,7 @@ def make_basins(K, seed):
     return jnp.clip(jnp.array(B), jnp.array(lower), jnp.array(upper))
 
 OF = problem.objective_function_aux
-CHUNK = 2  # CPU OOM probe: chunk2 traces ~10 min compile, 10.9 GB; chunk8 vg >25 min
+CHUNK = int(os.environ.get("L2D_CHUNK", "2"))  # CPU OOM probe: chunk2 traces ~10 min compile, 10.9 GB; chunk8 vg >25 min
 
 def run_chunks(fn, Xb):
     outs = [fn(Xb[i : i + CHUNK]) for i in range(0, Xb.shape[0], CHUNK)]

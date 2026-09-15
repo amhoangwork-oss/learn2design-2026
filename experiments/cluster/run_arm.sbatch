@@ -14,7 +14,9 @@
 #   mkdir -p /work/23minhha/learn2design/logs
 #   sbatch experiments/cluster/run_arm.sbatch 05_optimizer_race C0_raw_adam_K64
 #   sbatch experiments/cluster/run_arm.sbatch 06_feasibility_tricks ""
-#   # GPU variant: add --partition=gpu --gres=gpu:1 --time=04:00:00
+#   # GPU variant (preferred when idle A5000s — see sinfo -p gpu):
+#   L2D_DEVICE=gpu L2D_CHUNK=64 sbatch -J l2d-05-P0 -p gpu --gres=gpu:1 -t 02:00:00 \
+#     experiments/cluster/run_arm.sbatch 05_optimizer_race P0_prec_adam_K64
 set -euo pipefail
 EXP=${1:?experiment dir, e.g. 05_optimizer_race}
 export L2D_ARMS=${2:-}

@@ -22,7 +22,10 @@ import time
 import h5py
 import numpy as np
 
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+if os.environ.get("L2D_DEVICE") == "gpu":
+    os.environ.pop("JAX_PLATFORMS", None)  # use the sbatch-allocated GPU
+else:
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import jax
 import jax.numpy as jnp
@@ -104,7 +107,7 @@ OF = problem.objective_function_aux
 # Chunked vmap: XLA fuses the vmapped linear solves into giant buffers (OOM at
 # K>=8 unchunked on 39GB RAM). CHUNK=2 traces in ~10 min at 10.9 GB (probe:
 # chunk8 vg compile exceeded 25 min). All batch calls go through run_chunks.
-CHUNK = 2
+CHUNK = int(os.environ.get("L2D_CHUNK", "2"))  # CPU OOM probe: chunk2 traces ~10 min compile, 10.9 GB; chunk8 vg >25 min
 
 def run_chunks(fn, Xb):
     outs = [fn(Xb[i : i + CHUNK]) for i in range(0, Xb.shape[0], CHUNK)]

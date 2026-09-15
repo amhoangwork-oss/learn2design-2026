@@ -56,14 +56,17 @@ numbers in RESEARCH_LOG.md.
 | Exp | Question | Cluster shape |
 |---|---|---|
 | 07_k_scaling | vmap batch ceiling K on A5000 (fp32 vs fp64 cost); H100 transfer via TFLOP/bw ratios + safety margin (CPU K-scaling dropped) | 1–2 GPU sbatch jobs — run first, sets K for 09 |
-| 05_optimizer_race | raw vs preconditioned Adam × noise on/off, K=64/256 (seed 42) | one GPU sbatch per arm (idle A5000s, wall-clock-parallel) |
-| 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | one GPU sbatch per arm (A/B/C) |
-| 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | job array over topologies |
+| 05_optimizer_race | raw vs preconditioned Adam × noise on/off, K=64/256 (seed 42) | one matrix job, arms across GPUs (was: per-arm jobs — cap 6) |
+| 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | one matrix job, arms A/B/C across GPUs |
+| 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | one matrix job (`run_matrix.sbatch`), topologies in GPU waves |
 | 09_end2end_4h | full pipeline (basins → Adam → L-BFGS → best-feasible) under competition-like 4 h budget, logged | single job on A5000 + CPU comparison; submission dry-run |
 
-**GPU-first rule.** Check `sinfo -p gpu` for idle A5000s before submitting; run arms
-one-GPU-per-job (`sbatch -p gpu --gres=gpu:1`) instead of CPU nodes, so the whole
-arm matrix iterates in wall-clock parallel. CPU nodes are the fallback only.
+**GPU-first + one-job rule.** Per-user Slurm job cap = **6**. Never spray one job
+per arm: request the GPUs needed as a SINGLE job (`--gres=gpu:4`, max 4/node) and
+drive it with `experiments/cluster/run_matrix.sbatch` — one arm process per GPU,
+automatic waves for extra arms. Check `sinfo -p gpu` for idle A5000s first; CPU
+nodes are the fallback only. Job arrays count against the cap too — use the
+matrix driver instead (also for Exp 08).
 
 **H100 transfer rule (K-scaling without CPU runs).** Measured on the first GPU
 attempt: the UIFO sim is **float64 natively** (f64[.,50,~700,~700] propagation

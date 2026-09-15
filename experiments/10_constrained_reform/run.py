@@ -363,7 +363,7 @@ def run_arm(name, kind):
             if tb is None:  # host-side headroom diagnostic
                 tb = t_star_capped(aux["power_values"], Xb)
             tstars.append(float(jnp.mean(tb)))
-            if ph_kind == "proj":
+            if ph_kind in ("proj", "projlog"):
                 box_frac = float(jnp.mean(jnp.asarray(Xlog)[:, POW_IDX_NP] > P_MAX - 1e-6))
 
             Gz = G / S

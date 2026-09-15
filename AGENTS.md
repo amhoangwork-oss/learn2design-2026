@@ -68,9 +68,11 @@ drive it with `experiments/cluster/run_matrix.sbatch` — one arm process per GP
 automatic waves for extra arms. Check `sinfo -p gpu` for idle A5000s first; CPU
 nodes are the fallback only. Job arrays count against the cap too — use the
 matrix driver instead (also for Exp 08). Nodes carry exactly 4 A5000s, so >4
-simultaneous arms = **⌈n/4⌉ matrix jobs submitted together** (Exp 10's 7 arms =
-one `--gres=gpu:4` + one `--gres=gpu:3` job, every arm starting at once — no
-second wave), never one job per arm.
+simultaneous arms = **ONE multi-node matrix job** (`--nodes=2 --gres=gpu:4`: the
+driver's srun branch places one arm per GPU per node — up to 4·Nnodes arms in a
+single job slot; verified 1205). Fallback if multi-node is unavailable:
+⌈n/4⌉ single-node jobs submitted together (Exp 10's 7 arms = 4+3 GPUs), never
+one job per arm.
 
 **H100 transfer rule (K-scaling without CPU runs).** Measured on the first GPU
 attempt: the UIFO sim is **float64 natively** (f64[.,50,~700,~700] propagation

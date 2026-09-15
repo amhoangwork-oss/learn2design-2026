@@ -212,7 +212,7 @@ def _alm_scalar(p, lam):
     _, aux0 = OF(p)
     c = c_vec(aux0["power_values"])
     rho = float(CFG["rho"])
-    alm = jnp.sum((jnp.relu(lam + rho * c) ** 2 - lam**2) / (2.0 * rho))
+    alm = jnp.sum((jax.nn.relu(lam + rho * c) ** 2 - lam**2) / (2.0 * rho))
     return aux0["sensitivity_loss"] + alm, aux0
 
 def _head_scalar(p):
@@ -222,18 +222,27 @@ def _head_scalar(p):
     beta = float(CFG["beta_softmax"])
     return jax.scipy.special.logsumexp(beta * c) / beta, aux0
 
-proj_vg = jax.jit(jax.vmap(jax.value_and_grad(_proj_core, has_aux=True)))   # P1/P2/H1-ph2: (L, G, (aux,p2,t))
+proj_vg = jax.jit(jax.vmap(jax.value_and_grad(_proj_core, has_aux=True)))   # P1/P2/H1-ph2
 proj_val = jax.jit(jax.vmap(_proj_core))                                    # PB logging stream: (L, (aux,p2,t))
 vg0 = jax.jit(jax.vmap(jax.value_and_grad(lambda p: OF(p)[0])))             # raw-point grad (PB/D0/B1): (L, G)
 vaux0 = jax.jit(jax.vmap(lambda p: OF(p)[1]))                               # raw-point aux (D0/B1/init)
 alm_vg = jax.jit(jax.vmap(jax.value_and_grad(_alm_scalar, has_aux=True), in_axes=(0, 0)))
 head_vg = jax.jit(jax.vmap(jax.value_and_grad(_head_scalar, has_aux=True)))
 
+def _vag_split(out):
+    """Unpack value_and_grad(f, has_aux=True) across jax layouts:
+    jax 0.9: ((value, aux), grad); classic jax: (value, grad, aux)."""
+    if len(out) == 3:
+        v, g, a = out
+    else:
+        (v, a), g = out
+    return v, g, a
+
 BARRIER_MUS = [float(m) for m in CFG["barrier_mus"]]
 
 def barrier_fn(mu):
     def fn(value, threshold):
-        r = value / threshold
+        r = jnp.nan_to_num(value / threshold, nan=2.0, posinf=2.0, neginf=0.0)
         return jnp.where(r < 1.0, -mu * jnp.log1p(-jnp.clip(r, 0.0, 1.0 - 1e-12)), 1e3)
     return fn
 
@@ -331,7 +340,7 @@ def run_arm(name, kind):
         for it in range(steps):
             Xb = to_x(Z)
             if ph_kind == "proj":
-                L, G, (aux, Xlog, tb) = run_chunks(proj_vg, Xb)
+                L, G, (aux, Xlog, tb) = _vag_split(run_chunks(proj_vg, Xb))
                 Llog = aux["sensitivity_loss"]  # zero penalty => penalized loss
             elif ph_kind == "projlog":
                 Lr, G = run_chunks(vg0, Xb)          # raw-point gradient (no constraint feedback)
@@ -339,11 +348,11 @@ def run_arm(name, kind):
                 L = Lr                                # trajectory diagnostic
                 Llog = aux["sensitivity_loss"]
             elif ph_kind == "alm":
-                L, G, aux = run_chunks(alm_vg, Xb, Lam)
+                L, G, aux = _vag_split(run_chunks(alm_vg, Xb, Lam))
                 Xlog, tb = Xb, None
                 Llog = aux["sensitivity_loss"]
             elif ph_kind == "head":
-                L, G, aux = run_chunks(head_vg, Xb)
+                L, G, aux = _vag_split(run_chunks(head_vg, Xb))
                 Xlog, tb = Xb, None
                 Llog = aux["sensitivity_loss"]
             else:  # plain
@@ -352,9 +361,14 @@ def run_arm(name, kind):
                 Xlog, tb = Xb, None
                 Llog = L
 
+            # diverged basins (resonant random inits): huge finite loss + frozen
+            # grads so a single NaN basin cannot poison the batch or Adam state
+            L = jnp.where(jnp.isfinite(L), L, 1e6)
+            G = jnp.where(jnp.isfinite(G), G, 0.0)
+
             feas = aux["is_feasible"]
             sens = aux["sensitivity_loss"]
-            bf = jnp.min(jnp.where(feas, sens, jnp.inf))
+            bf = jnp.min(jnp.where(feas & jnp.isfinite(sens), sens, jnp.inf))
             best_feas = jnp.minimum(best_feas, bf)
             best = jnp.minimum(best, jnp.min(L))
             n_feas += int(jnp.sum(feas))
@@ -362,7 +376,7 @@ def run_arm(name, kind):
 
             if tb is None:  # host-side headroom diagnostic
                 tb = t_star_capped(aux["power_values"], Xb)
-            tstars.append(float(jnp.mean(tb)))
+            tstars.append(float(jnp.nanmean(tb)))
             if ph_kind in ("proj", "projlog"):
                 box_frac = float(jnp.mean(jnp.asarray(Xlog)[:, POW_IDX_NP] > P_MAX - 1e-6))
 
@@ -379,7 +393,7 @@ def run_arm(name, kind):
             Z = optax.apply_updates(Z, updates)
 
             if ph_kind == "alm" and (gstep + 1) % dual_every == 0:
-                Lam = jnp.relu(Lam + float(CFG["rho"]) * c_vec(aux["power_values"]))
+                Lam = jax.nn.relu(Lam + float(CFG["rho"]) * c_vec(aux["power_values"]))
 
             if restart_frac and (it + 1) % max(1, int(restart_frac * steps)) == 0 and it + 1 < steps:
                 k = K // 4

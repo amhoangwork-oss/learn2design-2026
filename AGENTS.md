@@ -60,6 +60,7 @@ numbers in RESEARCH_LOG.md.
 | 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | one matrix job, arms A/B/C across GPUs |
 | 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | one matrix job (`run_matrix.sbatch`), topologies in GPU waves |
 | 09_end2end_4h | full pipeline (basins → Adam → L-BFGS → best-feasible) under competition-like 4 h budget, logged | single job on A5000 + CPU comparison; submission dry-run |
+| 10_constrained_reform | boundary structure (docs §7–8): barrier/ALM/projected-Adam vs penalty; gauge-fixed + min-max-headroom + QCQP-laser aux objectives | one matrix job after 05/06 pick the inner solver |
 
 **GPU-first + one-job rule.** Per-user Slurm job cap = **6**. Never spray one job
 per arm: request the GPUs needed as a SINGLE job (`--gres=gpu:4`, max 4/node) and

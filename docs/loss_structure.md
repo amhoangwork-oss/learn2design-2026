@@ -124,3 +124,103 @@ R5. **soft-side power headroom as an explicit penalty schedule**: optimization i
 - Q3: Does log-power actually flatten the sensitivity response? (Exp 04 finite-diff probe)
 - Q4: Are dataset entries' losses reproducible with the competition problem?
   (Exp 03: evaluate 10 saved entries; validates our whole dataset-based pipeline.)
+
+## 7. The exact sim chain (source-verified, differometor 0.0.5 on cluster)
+
+Everything below is batched over the 50 frequencies (HLO `f64[.,50,~702,~701]`);
+`solve` = `jnp.linalg.solve`, one linear solve per system.
+
+1. **Carrier solve** (`simulate.py:290`): `M_c(θ,f) x_c = b`. Matrix entries written
+   per component (`components.py`):
+   - space: `φ = −exp(−i·2πf·L·n/c)` (line 174)
+   - laser: `E = sqrt(2P/ε₀c)·e^{i·phase}` (line 232)
+   - mirror/BS: reflectivity fractions, tuning phases `e^{i·tuning}`
+   - squeezer: `cosh(2r)` / `sinh(2r)·e^{2i·α}` quadrature mixing (line 283)
+2. **Signal solve** (`simulate.py:298–338`): connector entries scaled by the carrier
+   field, upper/lower sideband blocks forced conjugate-symmetric, `x_s = M_s^{-1} b_s`.
+3. **Quantum noise via adjoint chain** (`simulate.py:340–412`):
+   selections `s = W_qhd ⊙ x_c` (QHD phases scattered in), then
+   `w = M_s^{-H} s`, `v = N(θ) w`, `C = M_s^{-1} v`, and
+   `q² = 2·(UNIT_VACUUM·h·F₀/4)·Re⟨s, C⟩`
+   **= const · Re[ s^H M_s^{-1} N M_s^{-H} s ]** — a Hermitian quadratic form in the
+   carrier field vector, sandwiching the noise-source covariance through the inverse
+   signal transfer matrix.
+4. **Sensitivity** (`utils.py:346`): `S(f) = sqrt(q² + (4e-9·P₁)² + (1e-8·f·P₂)²)/P₀`
+   with `P₀ = |conj(x_c)·x_{s,up} + x_c·x_{s,low}|` at the homodyne detectors
+   (`components.py:829`); P₁/P₂ = signal proxies for amplitude/frequency noise.
+5. **Powers** (`utils.py:126`): `P_port = 0.5·ε₀c·|E_port|²` (`components.py:809`);
+   hard/soft side = per-component **max** over its ports; isolators → soft side.
+   Carrier is a single (DC) solve — port powers are f-independent.
+6. **Feasibility** (`dfbench/problems/base_problem.py:186`): the hard max check
+   `max_j P_j/T_j ≤ 1` elementwise over hard (3.5e6) / soft (2e3) / detector (1e-2).
+7. **Loss** (`base_problem.py:240`): `mean_f log10(S/S_voy) + Σ_j p(P_j/T_j)`.
+
+## 8. Boundary structure — exact homogeneity in the joint power scale (derived)
+
+Carrier fields are linear in each laser amplitude `sqrt(P_k)`:
+`E_j = Σ_k sqrt(P_k)·G_jk(θ_optics)` with optics-only gains `G_jk`. Under a joint
+rescale `P_k → t·P_k` (all lasers, one scalar t):
+`E_j → sqrt(t)·E_j ⇒ P_j → t·P_j` — **exact**, since `|sqrt(t)·x|² = t|x|²`.
+
+Sensitivity scalings under the same rescale (noise proxies ride the carrier):
+`q² ∝ t` (shot noise — the quadratic form is quadratic in the carrier), signal and
+classical-noise proxies `∝ t` (modulation sources scale with carrier amplitude —
+the standard laser-referred convention; consistent with Exp 04's probe showing the
+loss decreasing monotonically in power over decades, ≈0.65 loss-decades per
+log-decade). Hence for every frequency:
+
+```
+S(t)² = (α/t + β + γf²) / δ²        α,β,γ,δ > 0, optics-dependent
+```
+
+**strictly decreasing in t, saturating at the classical floor `sqrt(β+γf²)/δ`.**
+
+Consequences:
+1. **The optimum always sits ON the feasibility boundary.** For any optics, the
+   best feasible power scale is `t* = min_j T_j/P_j(θ)` — the max-constraint is
+   active at any optimum (whichever port saturates first — often the detector,
+   capped at 10 mW, which directly caps `P_sig`).
+2. **Feasibility restoration is closed-form.** One aux eval returns all `P_j`;
+   the largest feasible joint rescale is `t* = min(1, min_j T_j/P_j)`. Cost ≈ one
+   eval (~0.15 ms). No line search, no extra solves.
+3. **There are exactly two improvement channels**, coupled through
+   `S* = sqrt(α/t* + β + γf²)/δ`: (a) grow headroom `t*` (min-max power objective),
+   (b) shrink the noise coefficients α, β, γ (cavity/isolation design).
+
+## 9. Constrained reformulation — proposed Exp 10
+
+The problem is a smooth NLP: `min mean_f log10(S/S_voy) s.t. P_j(θ) ≤ T_j, θ ∈ box`
+(only chosen nonsmoothness: the relu/squashed penalty and the port maxima, which
+are locally smooth away from ties). Published-technique options:
+
+- **C1 interior point / log-barrier**: add `−μ Σ_j log(1 − P_j/T_j)`, schedule μ↓.
+  Every iterate strictly feasible ⇒ **every logged eval counts for the score**
+  (today most evals are infeasible and discarded by the scorer). First-order
+  friendly (Adam or L-BFGS on the augmented objective). Use log-space constraints
+  `c_j = log(P_j/T_j)` — by §8 homogeneity `∂c_j/∂log t = 1` exactly, so the
+  constraint-side conditioning (19 orders in raw space) collapses to O(1).
+- **C2 augmented Lagrangian**: `f + Σ_j [λ_j c_j + (ρ/2)c_j²]₊` with dual ascent
+  `λ ← max(λ + ρc, 0)`. Multiplier memory prevents the in/out-of-feasibility
+  oscillation that plain penalties show (stronger version of Exp 06's premise).
+- **C3 feasible-projected Adam**: run the true loss (zero penalty) and after every
+  step apply the closed-form §8.2 restoration, logging the projected point.
+  Projection cost ≈ 1 eval/step — negligible at 0.15 ms.
+- **C4 trust-constr / filter-SQP polish**: accept steps if objective *or* violation
+  improves (no penalty parameter); natural replacement for the plain L-BFGS stage.
+
+**Equivalent / auxiliary objectives:**
+- **A1 gauge fixing (exact equivalent)**: pin the joint power scale at the boundary
+  `t*(θ_rest)` and optimize only the remaining coords, unconstrained. Every eval
+  feasible by construction; the 6 power coords collapse to 1 boundary variable.
+- **A2 headroom min-max**: minimize `softmax_β max_j log(P_j/T_j)` (β annealed ↑)
+  as a first phase — a pure "make room" objective — then spend it (true loss,
+  power pinned at the new boundary).
+- **A3 conditional laser optimum (QCQP)**: at fixed optics, laser amplitudes u enter
+  every power as `|G_j u|²` and the readout as `|G₀u|²`. Maximizing detector power
+  s.t. hard/soft caps is a convex QCQP (generalized Rayleigh quotient) — globally
+  solvable via generalized eigenvectors/SDP. Since `∂log S/∂log P_sig = −1`
+  uniformly (steepest global direction, §2.2), this makes the 6 power coords (and
+  their constraint coupling) an analytic step instead of a search dimension.
+  (Check first whether laser phases are competition-exposed; that extends A3.)
+- **A4 worst-band softmin pretraining**: auxiliary weighted loss emphasizing the
+  worst frequency bands to find better basins, then polish on the true mean.

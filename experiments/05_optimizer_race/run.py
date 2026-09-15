@@ -214,13 +214,24 @@ ARMS = [
 ]
 
 results = []
+# Optional arm selection for Slurm parallelism: L2D_ARMS="P0_prec_adam_K64,PB_prec_noise_K128"
+# (comma-separated names; unset = run all arms in one process).
+_arm_filter = os.environ.get("L2D_ARMS")
+if _arm_filter:
+    _want = {s.strip() for s in _arm_filter.split(",")}
+    ARMS = [a for a in ARMS if a["name"] in _want]
+    print("arm filter:", sorted(_want), flush=True)
+
 for a in ARMS:
     print(f"\n=== arm {a['name']} ===", flush=True)
     r = run_arm(**a)
     r.pop("hist")
     results.append(r)
     print(json.dumps(r, indent=1), flush=True)
+    with open(os.path.join(OUT, f"summary_{a['name']}.json"), "w") as f:
+        json.dump(r, f, indent=2)
 
-with open(os.path.join(OUT, "summary.json"), "w") as f:
-    json.dump(results, f, indent=2)
+if results:
+    with open(os.path.join(OUT, "summary.json"), "w") as f:
+        json.dump(results, f, indent=2)
 print("\nsaved summary")

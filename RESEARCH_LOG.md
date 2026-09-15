@@ -6,11 +6,12 @@
 | 02 | Gradient conditioning per property family | ✅ |
 | 03 | Dataset reproducibility (dataset → problem → params) | ✅ |
 | 04 | 1-D response probes (log-power, log(1−R), periodicity) | ✅ |
-| 05 | Optimizer horse-race on seed 42 (Adam variants, preconditioning) | scaffolded — run on hpc-cei, one sbatch per arm |
-| 06 | Feasibility repair: penalty schedule + best-feasible tracking | scaffolded — run on hpc-cei, one sbatch per arm |
-| 07 | K-scaling microbenchmark: A5000 K-ceiling (fp32/fp64), H100 TFLOPs extrapolation | scaffolded (GPU-only) — run first, sets K |
-| 08 | Multi-topology transfer: best config on ~10 held-out dataset topologies | planned |
+| 05 | Optimizer horse-race on seed 42 (Adam variants, preconditioning) | running — hpc-cei job 1198 (one matrix job, 5 arms in 2 GPU waves) |
+| 06 | Feasibility repair: penalty schedule + best-feasible tracking | running (job 1198); arm A valid, arms B/C self-heal in wave 2 via stale-trace fix (see Exp 10 section) |
+| 07 | K-scaling microbenchmark: A5000 K-ceiling (fp32/fp64), H100 TFLOPs extrapolation | ✅ GPU chunk sweep: sim is f64-native; chunk 4 optimal (1.35 evals/s), OOM ≥ 8; H100 bandwidth-margin rule in AGENTS.md |
+| 08 | Multi-topology transfer: best config on ~10 held-out dataset topologies | planned (one matrix job) |
 | 09 | End-to-end 4 h-budget dry run (submission scaffold validation) | planned |
+| 10 | Constrained reformulation: boundary projection / barrier / ALM / gauge-fixed / headroom arms | scaffolded + smoke-validated (job 1200); awaiting 05/06 winner for uniform base_config |
 
 ---
 
@@ -123,6 +124,47 @@ physical space, not just phase). Periodicity holds for most, not all, tuning coo
 - optimizers: Adam-family with static preconditioner + decaying noise (NAAdam
   pattern) for basin descent; L-BFGS warm restarts for polish; penalty schedule
   relu→squashed; track best-feasible separately at every step.
+
+---
+
+## Exp 10 — Constrained reformulation scaffold (2026-09-16)
+
+**Motivation.** Source-derived boundary structure (docs/loss_structure.md §7–9): port
+powers are exactly homogeneous of degree 1 in the joint laser-power scale t, and
+S(t)² = (α/t + β + γf²)/δ² is strictly decreasing in t ⇒ every optimum sits ON the
+feasibility boundary, and the boundary rescale t* = safety·exp(−max_j c_j)
+(c_j = log(P_j/T_j), capped by the [0,200] power box) is closed-form from one aux
+eval — pushing power down when infeasible AND up to spend headroom.
+
+**Scaffold.** `experiments/10_constrained_reform/run.py` + `base_config.json`
+(uniform optimizer config — to be set from the 05/06 winner before submission).
+7 arms, feasibility layer is the only delta: D0 control (config-driven penalty
+phases), P1 self-projected eval (gradient flows through the projection inside the
+jitted graph), P2 gauge-fixed (power grads+noise masked), PB projection-at-logging-
+only, B1 log-barrier μ-ladder (1e-1→1e-3, init-projected), L1 augmented Lagrangian
+(per-basin dual ascent on log-space c_j), H1 headroom-min-max phase then projected
+descent. Metrics: best-feasible sens loss (the score), feas_frac, t_first_feas,
+mean t*, box_cap_frac; 25-step checkpoints.
+
+**Smoke validation (job 1200, L2D_SMOKE=1, K=8, 2 steps/phase, A5000).** All 7 arms
+complete with finite, differentiated results (best_feas 5.04–6.34 at 2 steps) and
+sane diagnostics (H1 box_cap 0.12; B1 mean t* 0.70 pulling infeasible random basins
+in). First smoke (1199) caught three real bugs, all fixed:
+1. **jax 0.9 changed the `has_aux` layout**: `value_and_grad(f, has_aux=True)`
+   returns `((value, aux), grad)`, not the classic `(value, grad, aux)` — unpack
+   shim `_vag_split` handles both.
+2. `jnp.relu` removed in jax 0.9 → `jax.nn.relu`.
+3. Diverged basins (resonant random inits pushed to the boundary → NaN powers)
+   poisoned batch stats via `min` → finite-loss/frozen-grad guards + nan-safe stats.
+
+**Stale-trace bug (also fixed in Exp 06).** `set_penalty_fn` REBINDS
+`problem.objective_function_aux` (fresh jitted closure, penalty baked at trace
+time). Holding `OF = problem.objective_function_aux` at module level traces the
+ORIGINAL penalty in every later phase. Exp 06's arms B/C in job 1198 launched with
+the bug but start in wave 2 — after the fix was pulled — so they run the correct
+zero→squashed schedules (arm A is squashed-only and correct under both; Exp 05
+never switches penalties). Rule: always resolve `problem.objective_function_aux(p)`
+at call time (Exp 10's `OF()` wrapper).
 
 ---
 

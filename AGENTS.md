@@ -60,14 +60,17 @@ numbers in RESEARCH_LOG.md.
 | 06_feasibility_tricks | zero-penalty phase → squashed repair vs squashed-only | one matrix job, arms A/B/C across GPUs |
 | 08_multitopo_transfer | best config on ~10 held-out dataset topologies (the actual score shape: mean over topologies) | one matrix job (`run_matrix.sbatch`), topologies in GPU waves |
 | 09_end2end_4h | full pipeline (basins → Adam → L-BFGS → best-feasible) under competition-like 4 h budget, logged | single job on A5000 + CPU comparison; submission dry-run |
-| 10_constrained_reform | boundary structure (docs §7–8): barrier/ALM/projected-Adam vs penalty; gauge-fixed + min-max-headroom + QCQP-laser aux objectives | one matrix job after 05/06 pick the inner solver |
+| 10_constrained_reform | boundary structure (docs §7–8): barrier/ALM/projected-Adam vs penalty; gauge-fixed + min-max-headroom + QCQP-laser aux objectives | **running** (jobs 1202+1203, all 7 arms parallel, a-priori defaults) |
 
 **GPU-first + one-job rule.** Per-user Slurm job cap = **6**. Never spray one job
 per arm: request the GPUs needed as a SINGLE job (`--gres=gpu:4`, max 4/node) and
 drive it with `experiments/cluster/run_matrix.sbatch` — one arm process per GPU,
 automatic waves for extra arms. Check `sinfo -p gpu` for idle A5000s first; CPU
 nodes are the fallback only. Job arrays count against the cap too — use the
-matrix driver instead (also for Exp 08).
+matrix driver instead (also for Exp 08). Nodes carry exactly 4 A5000s, so >4
+simultaneous arms = **⌈n/4⌉ matrix jobs submitted together** (Exp 10's 7 arms =
+one `--gres=gpu:4` + one `--gres=gpu:3` job, every arm starting at once — no
+second wave), never one job per arm.
 
 **H100 transfer rule (K-scaling without CPU runs).** Measured on the first GPU
 attempt: the UIFO sim is **float64 natively** (f64[.,50,~700,~700] propagation
@@ -122,4 +125,6 @@ hpc-cei-cluster skill):
   survives any interruption.
 - Per-user job cap = 6 → multi-arm/multi-topology runs go out as ONE matrix job
   (`experiments/cluster/run_matrix.sbatch`), never one job per arm, never arrays.
+  >4 simultaneous arms: nodes have 4 A5000s max → ⌈n/4⌉ matrix jobs submitted
+  together (e.g. 7 arms = 4+3 GPU jobs), no second wave.
 - GPU reserved for ML training locally — local machine runs no experiments.

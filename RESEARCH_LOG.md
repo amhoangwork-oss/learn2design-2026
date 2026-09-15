@@ -11,7 +11,7 @@
 | 07 | K-scaling microbenchmark: A5000 K-ceiling (fp32/fp64), H100 TFLOPs extrapolation | ✅ GPU chunk sweep: sim is f64-native; chunk 4 optimal (1.35 evals/s), OOM ≥ 8; H100 bandwidth-margin rule in AGENTS.md |
 | 08 | Multi-topology transfer: best config on ~10 held-out dataset topologies | planned (one matrix job) |
 | 09 | End-to-end 4 h-budget dry run (submission scaffold validation) | planned |
-| 10 | Constrained reformulation: boundary projection / barrier / ALM / gauge-fixed / headroom arms | **running** (job 1201, a-priori defaults: precond+noise+restarts, K=128, 200 steps) — 05/06/10 compared together when all land |
+| 10 | Constrained reformulation: boundary projection / barrier / ALM / gauge-fixed / headroom arms | **running** (jobs 1202 + 1203, all 7 arms in parallel on 4+3 GPUs; a-priori defaults: precond+noise+restarts, K=128, 200 steps) — 05/06/10 compared together when all land |
 
 ---
 

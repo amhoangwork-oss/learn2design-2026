@@ -1,0 +1,17 @@
+{
+  "note": "Uniform optimizer config for Exp 10 — set from the Exp 05/06 winner before submitting. Arms differ ONLY in the feasibility layer.",
+  "K": 128,
+  "seed": 42,
+  "lr": 0.05,
+  "noise0": 0.3,
+  "transform": "precond",
+  "warm_restart_every": 0.25,
+  "max_evals": 25600,
+  "safety": 0.999,
+  "rho": 10.0,
+  "beta_softmax": 20.0,
+  "dual_every": 5,
+  "headroom_frac": 0.3,
+  "barrier_mus": [0.1, 0.01, 0.001],
+  "D0_schedule": [["squashed", 1.0, 1.0]]
+}

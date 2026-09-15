@@ -96,7 +96,12 @@ def make_basins(K, seed):
     B[n_ds:] = lower + rng.random((K - n_ds, N)) * span
     return jnp.clip(jnp.array(B), jnp.array(lower), jnp.array(upper))
 
-OF = problem.objective_function_aux
+def OF(p):
+    # Resolve AT CALL TIME: set_penalty_fn rebinds problem.objective_function_aux
+    # (fresh jitted closure, penalty baked into the trace). Holding the attribute
+    # itself would trace a STALE objective in every phase after the first.
+    return problem.objective_function_aux(p)
+
 CHUNK = int(os.environ.get("L2D_CHUNK", "2"))  # CPU OOM probe: chunk2 traces ~10 min compile, 10.9 GB; chunk8 vg >25 min
 
 def run_chunks(fn, Xb):

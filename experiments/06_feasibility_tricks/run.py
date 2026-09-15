@@ -100,34 +100,35 @@ def run_chunks(fn, Xb):
     outs = [fn(Xb[i : i + CHUNK]) for i in range(0, Xb.shape[0], CHUNK)]
     return jax.tree_util.tree_map(lambda *xs: jnp.concatenate(xs, axis=0), *outs)
 
-_vg = jax.jit(jax.vmap(jax.value_and_grad(lambda p: OF(p)[0])))
-_vaux = jax.jit(jax.vmap(lambda p: OF(p)[1]))
+# NOTE: value_and_grad is jitted PER PHASE inside run_arm — the penalty fn is
+# baked into the trace at trace time, so switching set_penalty_fn requires a
+# fresh trace (a stale trace would keep optimizing the previous phase's loss).
 
-def vg_batch(Xb):
-    return run_chunks(_vg, Xb)
+def run_arm(name, zero_frac=0.0, aggressive=1.0, tail_frac=0.0, K=128, seed=7,
+            lr=0.05, noise0=0.3, max_evals=25600):
+    # Penalty schedule as phases (fraction of total evals each):
+    #   A: squashed always
+    #   B: zero -> squashed
+    #   C: zero -> squashed*aggressive -> squashed (tail_frac)
+    # set_penalty_fn raises after logging starts, and the penalty fn is baked
+    # into the value_and_grad trace — so each phase: set penalty, build a FRESH
+    # jit trace + fresh Objective, keep optimizer state / Z across phases.
+    phases = []
+    if zero_frac > 1e-9:
+        phases.append((zero_penalty, zero_frac, "zero"))
+    mid = 1.0 - zero_frac - tail_frac
+    if mid > 1e-9:
+        if aggressive == 1.0:
+            phases.append((squashed_relu_penalty, mid, "squashed"))
+        else:
+            phases.append((lambda x, _k=aggressive: _k * squashed_relu_penalty(x),
+                           mid, f"squashed*{aggressive}"))
+    if tail_frac > 1e-9 and aggressive != 1.0:
+        phases.append((squashed_relu_penalty, tail_frac, "squashed"))
+    if not phases:
+        phases = [(squashed_relu_penalty, 1.0, "squashed")]
 
-def aux_batch(Xb):
-    return run_chunks(_vaux, Xb)
-
-def run_arm(name, zero_frac, aggressive=1.0, K=128, seed=7, lr=0.05, noise0=0.3, max_evals=25600):
-    obj = Objective(problem, max_time=3600.0, max_evals=max_evals,
-                    save=["batched_loss", "batched_is_feasible"])
-    # penalty schedule: zero for zero_frac, then squashed (possibly scaled)
-    # implement via set_penalty_fn: zero_penalty for phase 1; after that switch.
-    # set_penalty_fn re-traces: do it ONCE mid-run (allowed: only before logging? -> NO,
-    # it raises after logging). So: build TWO problems? Same problem object is shared.
-    # Solution: run phase 1 with zero_penalty set BEFORE start_logging, then rebuild a
-    # second Objective sharing the problem AFTER set_penalty_fn(squashed) and start
-    # logging of a fresh Objective for phase 2. Budget continuity handled by max_evals.
     n_steps = max_evals // K
-    z_steps1 = int(zero_frac * n_steps)
-
-    # --- phase 1: zero penalty ---
-    problem.set_penalty_fn(zero_penalty)
-    obj1 = Objective(problem, max_time=3600.0, max_evals=int(zero_frac * max_evals),
-                     save=["batched_loss", "batched_is_feasible"])
-    obj1.start_logging()
-
     B0 = make_basins(K, seed)
     Z = to_z(B0)
     optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(lr))
@@ -140,47 +141,40 @@ def run_arm(name, zero_frac, aggressive=1.0, K=128, seed=7, lr=0.05, noise0=0.3,
     best = jnp.inf
     hist = []
     t0 = time.time()
-    for it in range(z_steps1):
-        Xb = to_x(Z)
-        L, G = vg_batch(Xb)
-        aux = aux_batch(Xb)
-        feas = aux["is_feasible"]
-        best = jnp.minimum(best, jnp.min(L))
-        bf = jnp.min(jnp.where(feas, L, jnp.inf))
-        best_feas = jnp.minimum(best_feas, bf)
-        n_feas += int(jnp.sum(feas))
-        obj1.log_evaluation(params=Xb, loss=L, aux=aux)
-        updates, state = v_opt(G / s, state, Z)
-        frac = 1.0 - it / z_steps1
-        key, nk = jax.random.split(key)
-        updates = updates + jax.random.normal(nk, Z.shape) * (noise0 * frac) * 0.01
-        Z = optax.apply_updates(Z, updates)
-        hist.append((time.time() - t0, float(bf)))
 
-    # --- phase 2: squashed penalty (fresh Objective for clean logging) ---
-    problem.set_penalty_fn(squashed_relu_penalty)
-    obj2 = Objective(problem, max_time=3600.0, max_evals=max_evals - int(zero_frac * max_evals),
-                     save=["batched_loss", "batched_is_feasible"])
-    obj2.start_logging()
-    for it in range(n_steps - z_steps1):
-        Xb = to_x(Z)
-        L, G = vg_batch(Xb)
-        aux = aux_batch(Xb)
-        feas = aux["is_feasible"]
-        bf = jnp.min(jnp.where(feas, L, jnp.inf))
-        best_feas = jnp.minimum(best_feas, bf)
-        n_feas += int(jnp.sum(feas))
-        obj2.log_evaluation(params=Xb, loss=L, aux=aux)
-        updates, state = v_opt(G / s, state, Z)
-        if it < 0.7 * (n_steps - z_steps1):
-            frac = 1.0 - it / (0.7 * (n_steps - z_steps1))
+    for pen_fn, frac, label in phases:
+        problem.set_penalty_fn(pen_fn)
+        vg = jax.jit(jax.vmap(jax.value_and_grad(lambda p: OF(p)[0])))
+        vaux = jax.jit(jax.vmap(lambda p: OF(p)[1]))
+        steps = int(round(frac * n_steps))
+        if steps <= 0:
+            continue
+        obj = Objective(problem, max_time=3600.0, max_evals=steps * K,
+                        save=["batched_loss", "batched_is_feasible"])
+        obj.start_logging()
+        for it in range(steps):
+            Xb = to_x(Z)
+            L, G = run_chunks(vg, Xb)
+            aux = run_chunks(vaux, Xb)
+            feas = aux["is_feasible"]
+            best = jnp.minimum(best, jnp.min(L))
+            bf = jnp.min(jnp.where(feas, L, jnp.inf))
+            best_feas = jnp.minimum(best_feas, bf)
+            n_feas += int(jnp.sum(feas))
+            obj.log_evaluation(params=Xb, loss=L, aux=aux)
+            updates, state = v_opt(G / s, state, Z)
+            nfrac = 1.0 - it / steps
             key, nk = jax.random.split(key)
-            updates = updates + jax.random.normal(nk, Z.shape) * (noise0 * frac) * 0.01
-        Z = optax.apply_updates(Z, updates)
-        hist.append((time.time() - t0, float(bf)))
+            updates = updates + jax.random.normal(nk, Z.shape) * (noise0 * nfrac) * 0.01
+            Z = optax.apply_updates(Z, updates)
+            hist.append((time.time() - t0, float(bf)))
+        print(f"  [{name}] phase {label} done: best={float(best):.4f} "
+              f"best_feas={float(best_feas):.4f} n_feas={n_feas}", flush=True)
 
     wall = time.time() - t0
-    return dict(name=name, zero_frac=zero_frac, aggressive=aggressive, K=K,
+    return dict(name=name, zero_frac=zero_frac, aggressive=aggressive,
+                tail_frac=tail_frac, K=K,
+                schedule=[lab for _, _, lab in phases],
                 iters=n_steps, evals=max_evals, wall_s=wall,
                 best=float(best), best_feasible=float(best_feas), n_feasible=n_feas,
                 feas_frac=n_feas / max_evals, hist=hist)
@@ -188,6 +182,8 @@ def run_arm(name, zero_frac, aggressive=1.0, K=128, seed=7, lr=0.05, noise0=0.3,
 ARMS = [
     dict(name="A_squashed_always", zero_frac=0.0, K=64, max_evals=12800),
     dict(name="B_zero40_then_squashed", zero_frac=0.4, K=64, max_evals=12800),
+    dict(name="C_zero40_squashedx4_tail10", zero_frac=0.4, aggressive=4.0, tail_frac=0.1,
+         K=64, max_evals=12800),
 ]
 
 results = []
